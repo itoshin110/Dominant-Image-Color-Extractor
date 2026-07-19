@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dominant Image Colors</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: #f5f5f7;
+      color: #1d1d1f;
+    }
+
+    main {
+      width: min(720px, calc(100% - 32px));
+      margin: 48px auto;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    .description {
+      margin: 0 0 24px;
+      color: #5f6368;
+      line-height: 1.6;
+    }
+
+    .panel {
+      background: #ffffff;
+      border: 1px solid #d9d9df;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.05);
+    }
+
+    .drop-zone {
+      display: grid;
+      place-items: center;
+      min-height: 150px;
+      padding: 20px;
+      border: 2px dashed #b8bcc6;
+      border-radius: 12px;
+      background: #fafafa;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background-color 0.2s;
+      box-sizing: border-box;
+    }
+
+    .drop-zone:hover,
+    .drop-zone.dragover {
+      border-color: #6f7683;
+      background: #f0f1f4;
+    }
+
+    .drop-zone strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 17px;
+    }
+
+    .drop-zone span {
+      color: #5f6368;
+      font-size: 14px;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    #preview {
+      display: none;
+      max-width: 100%;
+      max-height: 320px;
+      margin: 24px auto 0;
+      border: 1px solid #d9d9df;
+      object-fit: contain;
+    }
+
+    #status {
+      margin: 18px 0 0;
+      color: #5f6368;
+    }
+
+    #results {
+      display: grid;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .color-row {
+      display: grid;
+      grid-template-columns: 72px 1fr;
+      gap: 16px;
+      align-items: center;
+      padding: 14px;
+      border: 1px solid #d9d9df;
+      border-radius: 10px;
+    }
+
+    .swatch {
+      width: 72px;
+      height: 72px;
+      border-radius: 8px;
+      border: 1px solid rgba(0, 0, 0, 0.18);
+      box-sizing: border-box;
+    }
+
+    .rank {
+      margin-bottom: 5px;
+      font-weight: 700;
+    }
+
+    .value {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      line-height: 1.7;
+    }
+
+    .count {
+      margin-top: 4px;
+      color: #5f6368;
+      font-size: 14px;
+    }
+
+    canvas {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Dominant Image Colors</h1>
+    <p class="description">
+      Displays up to the three most frequent colors in the image.
+      Fully transparent pixels are excluded from the analysis.
+    </p>
+
+    <section class="panel">
+      <label id="dropZone" class="drop-zone" for="fileInput">
+        <div>
+          <strong>Drag and drop an image here</strong>
+          <span>or click to choose an image</span>
+        </div>
+      </label>
+      <input id="fileInput" type="file" accept="image/*">
+      <img id="preview" alt="Preview of the selected image">
+      <p id="status">Please select an image.</p>
+      <div id="results"></div>
+      <canvas id="canvas"></canvas>
+    </section>
+  </main>
+
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const dropZone = document.getElementById("dropZone");
+    const preview = document.getElementById("preview");
+    const status = document.getElementById("status");
+    const results = document.getElementById("results");
+    const canvas = document.getElementById("canvas");
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+
+    fileInput.addEventListener("change", () => {
+      handleFile(fileInput.files[0]);
+    });
+
+    ["dragenter", "dragover"].forEach(eventName => {
+      dropZone.addEventListener(eventName, event => {
+        event.preventDefault();
+        dropZone.classList.add("dragover");
+      });
+    });
+
+    ["dragleave", "drop"].forEach(eventName => {
+      dropZone.addEventListener(eventName, event => {
+        event.preventDefault();
+        dropZone.classList.remove("dragover");
+      });
+    });
+
+    dropZone.addEventListener("drop", event => {
+      const file = event.dataTransfer.files[0];
+      handleFile(file);
+    });
+
+    function handleFile(file) {
+      if (!file) {
+        resetView();
+        return;
+      }
+
+      if (!file.type.startsWith("image/")) {
+        status.textContent = "Please select an image file.";
+        results.innerHTML = "";
+        preview.style.display = "none";
+        return;
+      }
+
+      const objectUrl = URL.createObjectURL(file);
+      const image = new Image();
+
+      image.onload = () => {
+        preview.src = objectUrl;
+        preview.style.display = "block";
+
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0);
+
+        const imageData = context.getImageData(
+          0, 0, canvas.width, canvas.height
+        ).data;
+
+        const counts = new Map();
+        let countedPixels = 0;
+
+        for (let i = 0; i < imageData.length; i += 4) {
+          const alpha = imageData[i + 3];
+
+          if (alpha === 0) {
+            continue;
+          }
+
+          const red = imageData[i];
+          const green = imageData[i + 1];
+          const blue = imageData[i + 2];
+          const key = `${red},${green},${blue}`;
+
+          counts.set(key, (counts.get(key) || 0) + 1);
+          countedPixels++;
+        }
+
+        const topColors = [...counts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3);
+
+        renderResults(topColors, countedPixels);
+        URL.revokeObjectURL(objectUrl);
+      };
+
+      image.onerror = () => {
+        status.textContent = "The image could not be loaded.";
+        results.innerHTML = "";
+        preview.style.display = "none";
+        URL.revokeObjectURL(objectUrl);
+      };
+
+      image.src = objectUrl;
+    }
+
+    function renderResults(topColors, totalPixels) {
+      results.innerHTML = "";
+
+      if (topColors.length === 0) {
+        status.textContent = "No analyzable pixels were found.";
+        return;
+      }
+
+      status.textContent =
+        `${totalPixels.toLocaleString()} pixels analyzed.`;
+
+      topColors.forEach(([key, count], index) => {
+        const [red, green, blue] = key.split(",").map(Number);
+        const hex = rgbToHex(red, green, blue);
+        const ratio = (count / totalPixels * 100).toFixed(2);
+
+        const row = document.createElement("div");
+        row.className = "color-row";
+
+        const swatch = document.createElement("div");
+        swatch.className = "swatch";
+        swatch.style.backgroundColor = `rgb(${red}, ${green}, ${blue})`;
+
+        const info = document.createElement("div");
+        info.innerHTML = `
+          <div class="rank">Rank ${index + 1}</div>
+          <div class="value">RGB: ${red}, ${green}, ${blue}</div>
+          <div class="value">HEX: ${hex}</div>
+          <div class="count">
+            ${count.toLocaleString()} pixels (${ratio}%)
+          </div>
+        `;
+
+        row.appendChild(swatch);
+        row.appendChild(info);
+        results.appendChild(row);
+      });
+    }
+
+    function rgbToHex(red, green, blue) {
+      return "#" + [red, green, blue]
+        .map(value => value.toString(16).padStart(2, "0"))
+        .join("")
+        .toUpperCase();
+    }
+
+    function resetView() {
+      preview.removeAttribute("src");
+      preview.style.display = "none";
+      status.textContent = "Please select an image.";
+      results.innerHTML = "";
+    }
+  </script>
+</body>
+</html>
