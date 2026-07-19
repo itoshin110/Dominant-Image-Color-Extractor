@@ -12,3 +12,5 @@ The tool displays the top three colors in:
 Images can be uploaded by clicking the upload area or by dragging and dropping a file.
 
 All image processing is performed locally in the browser. No image data is uploaded to a server.
+
+![Screenshot of the Dominant Image Color Extractor](screenshot.png)
